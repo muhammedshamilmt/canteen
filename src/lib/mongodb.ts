@@ -1,10 +1,11 @@
-import { MongoClient } from 'mongodb';
+import { MongoClient, Db } from 'mongodb';
 
 if (!process.env.MONGODB_URI) {
   throw new Error('Please add your Mongo URI to .env.local');
 }
 
-const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/canteen-tracker-app';
+const uri = process.env.MONGODB_URI;
+const dbName = process.env.MONGODB_DB || 'as';
 const options = {};
 
 let client;
@@ -27,5 +28,17 @@ if (process.env.NODE_ENV === 'development') {
   client = new MongoClient(uri, options);
   clientPromise = client.connect();
 }
+
+export async function connectToDatabase(): Promise<Db> {
+  const client = await clientPromise;
+  return client.db(dbName);
+}
+
+export async function getDatabase() {
+  const client = await clientPromise;
+  return client.db(dbName);
+}
+
+export { dbName };
 
 export default clientPromise; 

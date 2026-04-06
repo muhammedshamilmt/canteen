@@ -8,7 +8,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Email and OTP are required' }, { status: 400 });
     }
     const client = await clientPromise;
-    const db = client.db('canteen-tracker-app');
+    const db = client.db();
 
     // Find the OTP document
     const otpDoc = await db.collection('otpVerifications').findOne({

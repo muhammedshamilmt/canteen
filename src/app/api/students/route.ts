@@ -3,6 +3,7 @@ import { connectToDatabase } from '@/lib/db';
 import { Student, validateStudent } from './schema';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
+import { addCacheHeaders } from '@/lib/cache-headers';
 
 interface Student {
   _id?: string;
@@ -19,9 +20,13 @@ interface Student {
 export async function GET() {
   try {
     const client = await clientPromise;
-    const db = client.db("canteen-tracker-app");
+    const db = client.db();
     const students = await db.collection('students').find({}).toArray();
-    return NextResponse.json(students);
+    // Serialize _id to string so it works as a query param
+    const serialized = students.map(s => ({ ...s, _id: s._id.toString() }));
+    return NextResponse.json(serialized, {
+      headers: addCacheHeaders({}, 'medium')
+    });
   } catch (error) {
     console.error('Error fetching students:', error);
     return NextResponse.json(
@@ -34,7 +39,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const client = await clientPromise;
-    const db = client.db("canteen-tracker-app");
+    const db = client.db();
     const student: Student = await request.json();
 
     // Check if admission number already exists
@@ -60,7 +65,7 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
   try {
     const client = await clientPromise;
-    const db = client.db("canteen-tracker-app");
+    const db = client.db();
     const student: Student = await request.json();
 
     // If admission number is being changed, check if new one exists
@@ -100,42 +105,37 @@ export async function PUT(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const client = await clientPromise;
-    const db = client.db("canteen-tracker-app");
+    const db = client.db();
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
 
     if (!id) {
-      return NextResponse.json(
-        { error: 'Student ID is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Student ID is required' }, { status: 400 });
     }
 
-    let objectId;
-    try {
-      objectId = new ObjectId(id);
-    } catch (error) {
-      return NextResponse.json(
-        { error: 'Invalid student ID format' },
-        { status: 400 }
-      );
+    // Try delete by ObjectId first, then by string _id, then by admissionNumber
+    let result = { deletedCount: 0 };
+
+    if (ObjectId.isValid(id)) {
+      result = await db.collection('students').deleteOne({ _id: new ObjectId(id) });
     }
 
-    const result = await db.collection('students').deleteOne({ _id: objectId });
+    // Fallback: try matching as string field
+    if (result.deletedCount === 0) {
+      result = await db.collection('students').deleteOne({ admissionNumber: id });
+    }
 
     if (result.deletedCount === 0) {
-      return NextResponse.json(
-        { error: 'Student not found' },
-        { status: 404 }
-      );
+      // Log what IDs exist for debugging
+      const sample = await db.collection('students').find({}).limit(3).toArray();
+      console.log('Sample student IDs:', sample.map(s => s._id.toString()));
+      console.log('Tried to delete ID:', id);
+      return NextResponse.json({ error: 'Student not found' }, { status: 404 });
     }
 
     return NextResponse.json({ message: 'Student deleted successfully' });
   } catch (error) {
     console.error('Error deleting student:', error);
-    return NextResponse.json(
-      { error: 'Failed to delete student' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to delete student' }, { status: 500 });
   }
 } 

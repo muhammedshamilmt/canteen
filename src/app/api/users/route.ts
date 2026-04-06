@@ -3,6 +3,7 @@ import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 import bcrypt from 'bcryptjs';
 import { connectToDatabase } from '@/lib/mongodb';
+import { addCacheHeaders } from '@/lib/cache-headers';
 
 interface Attendance {
   present: boolean;
@@ -37,7 +38,7 @@ const defaultAttendance = {
 export async function POST(request: Request) {
   try {
     const client = await clientPromise;
-    const db = client.db("canteen-tracker-app");
+    const db = client.db();
     const { admissionNumber, fullName, email, password, campus } = await request.json();
 
     // First check if the admission number exists in students collection
@@ -112,19 +113,23 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   try {
     const client = await clientPromise;
-    const db = client.db("canteen-tracker-app");
+    const db = client.db();
     const { searchParams } = new URL(request.url);
     const admissionNumber = searchParams.get('admissionNumber');
 
     // If admissionNumber is provided, return specific user
     if (admissionNumber) {
       const user = await db.collection("users").findOne({ admissionNumber });
-      return NextResponse.json(user);
+      return NextResponse.json(user, {
+        headers: addCacheHeaders({}, 'short')
+      });
     }
 
     // Otherwise, return all users
     const users = await db.collection("users").find({}).toArray();
-    return NextResponse.json(users);
+    return NextResponse.json(users, {
+      headers: addCacheHeaders({}, 'short')
+    });
   } catch (error) {
     return NextResponse.json(
       { error: 'Failed to fetch users' },
@@ -145,7 +150,7 @@ export async function PUT(request: Request) {
     }
 
     const client = await clientPromise;
-    const db = client.db("canteen-tracker-app");
+    const db = client.db();
     const updateData: any = {};
 
     // Update attendance if provided
@@ -179,6 +184,35 @@ export async function PUT(request: Request) {
       return NextResponse.json(
         { error: 'User not found' },
         { status: 404 }
+      );
+    }
+
+    // Save to attendance history if attendance was updated
+    if (attendance) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      await db.collection('attendance_history').updateOne(
+        { 
+          admissionNumber,
+          date: today
+        },
+        {
+          $set: {
+            admissionNumber,
+            date: today,
+            meals: {
+              coffee: attendance?.coffee?.present || false,
+              breakfast: attendance?.breakfast?.present || false,
+              lunch: attendance?.lunch?.present || false,
+              tea: attendance?.tea?.present || false,
+              dinner: attendance?.dinner?.present || false,
+            },
+            isSick: isSick || false,
+            updatedAt: new Date()
+          }
+        },
+        { upsert: true }
       );
     }
 

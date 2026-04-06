@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { Document } from 'mongodb';
+import { addCacheHeaders } from '@/lib/cache-headers';
 
 interface Student extends Document {
   _id: string;
@@ -159,6 +160,8 @@ export async function GET() {
         admissionNumber: student.admissionNumber,
         campus: student.campus
       }))
+    }, {
+      headers: addCacheHeaders({}, 'short')
     });
   } catch (error) {
     console.error('Error in overview API:', error);

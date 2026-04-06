@@ -9,7 +9,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
     }
     const client = await clientPromise;
-    const db = client.db('canteen-tracker-app');
+    const db = client.db();
 
     // Hash the new password
     const hashedPassword = await bcrypt.hash(password, 12);

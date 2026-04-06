@@ -5,6 +5,7 @@ if (!process.env.MONGODB_URI) {
 }
 
 const uri = process.env.MONGODB_URI;
+const dbName = process.env.MONGODB_DB || 'as';
 const options = {};
 
 let client;
@@ -30,6 +31,6 @@ if (process.env.NODE_ENV === 'development') {
 
 export async function connectToDatabase(): Promise<Db> {
   const client = await clientPromise;
-  const db = client.db('canteen-tracker-app');
+  const db = client.db(dbName);
   return db;
 } 

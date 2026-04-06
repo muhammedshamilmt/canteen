@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { toast } from 'sonner';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { Shield } from 'lucide-react';
+import Link from 'next/link';
 
 const VerifyOTP = () => {
   const [otp, setOtp] = useState('');

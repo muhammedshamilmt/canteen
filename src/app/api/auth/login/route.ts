@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
-import clientPromise from '@/lib/mongodb';
+import { connectToDatabase } from '@/lib/db';
 import bcrypt from 'bcryptjs';
 
 export async function POST(request: Request) {
   try {
-    const client = await clientPromise;
-    const db = client.db("canteen-tracker-app");
+    const db = await connectToDatabase();
     const { admissionNumber, password } = await request.json();
 
     // Check if it's an admin login
@@ -52,8 +51,11 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error('Login error:', error);
+    const message = process.env.NODE_ENV === 'development' && error instanceof Error
+      ? error.message
+      : 'Login failed';
     return NextResponse.json(
-      { error: 'Login failed' },
+      { error: message },
       { status: 500 }
     );
   }

@@ -1,7 +1,11 @@
+'use client';
+
 import React from 'react';
 import Link from 'next/link';
 
 const Footer = () => {
+  const currentYear = new Date().getFullYear();
+  
   return (
     <footer className="bg-gray-100 border-t border-gray-200">
       <div className="container mx-auto px-4 py-12">
@@ -45,7 +49,7 @@ const Footer = () => {
         </div>
         
         <div className="border-t border-gray-200 mt-8 pt-8 flex flex-col md:flex-row justify-between items-center">
-          <p className="text-gray-600">© {new Date().getFullYear()} CanteenTracker. All rights reserved.</p>
+          <p className="text-gray-600">© {currentYear} CanteenTracker. All rights reserved.</p>
           <div className="flex space-x-4 mt-4 md:mt-0">
             <p>developed by <a href="https://github.com/muhammedshamilmt" className="text-gray-500 hover:text-canteen-blue">Muhammed Shamil MT ♥️</a></p>
             <a href="#" className="text-gray-500 hover:text-canteen-blue">

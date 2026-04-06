@@ -1,6 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiClient } from '@/lib/api-client';
+import { invalidateAfterMutation } from '@/lib/cache-invalidate';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,49 +32,51 @@ interface User {
 }
 
 const UsersPage = () => {
-  const [users, setUsers] = useState<User[]>([]);
+  const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
   const [selectedClass, setSelectedClass] = useState<string>('all');
   const [selectedCampus, setSelectedCampus] = useState<string>('all');
   const [newUser, setNewUser] = useState({
-    fullName: '',
-    admissionNumber: '',
-    role: 'student',
-    class: '8' as User['class'],
-    campus: 'Main' as User['campus'],
+    fullName: '', admissionNumber: '', role: 'student',
+    class: '8' as User['class'], campus: 'Main' as User['campus'],
   });
 
   const AVAILABLE_CLASSES = ['8','9', 'P1', 'P2', 'D1', 'D2', 'D3','PG 1'];
   const AVAILABLE_CAMPUSES = ['Main', 'PG', 'Dental'];
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
+  const { data: users = [], isLoading } = useQuery<User[]>({
+    queryKey: ['users'],
+    queryFn: () => apiClient.get('/api/users'),
+    staleTime: 3 * 60 * 1000,
+  });
 
-  const fetchUsers = async () => {
-    try {
-      const response = await fetch('/api/users');
-      if (!response.ok) throw new Error('Failed to fetch users');
-      const data = await response.json();
-      setUsers(data);
-    } catch (error) {
-      toast.error('Failed to load users');
-      console.error('Error fetching users:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => apiClient.put(`/api/users/${id}`, data),
+    onSuccess: () => { invalidateAfterMutation(queryClient, 'users'); setIsDialogOpen(false); toast.success('User updated successfully'); },
+    onError: (e: any) => toast.error(e.message || 'Failed to update user'),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data: any) => apiClient.post('/api/users', data),
+    onSuccess: () => { invalidateAfterMutation(queryClient, 'users'); setIsAddDialogOpen(false); setNewUser({ fullName: '', admissionNumber: '', role: 'student', class: '8', campus: 'Main' }); toast.success('User created successfully'); },
+    onError: (e: any) => toast.error(e.message || 'Failed to create user'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiClient.delete(`/api/users/${id}`),
+    onSuccess: () => { invalidateAfterMutation(queryClient, 'users'); toast.success('User deleted successfully'); },
+    onError: (e: any) => toast.error(e.message || 'Failed to delete user'),
+  });
 
   // Filter users based on search query, selected class, and selected campus
   const filteredUsers = users.filter(user => {
     const matchesSearch = 
-      user.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.admissionNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.role.toLowerCase().includes(searchQuery.toLowerCase());
+      (user.fullName?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+      (user.admissionNumber?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+      (user.role?.toLowerCase() || '').includes(searchQuery.toLowerCase());
     
     const matchesClass = selectedClass === 'all' || user.class === selectedClass;
     const matchesCampus = selectedCampus === 'all' || user.campus === selectedCampus;
@@ -88,114 +93,31 @@ const UsersPage = () => {
     setIsAddDialogOpen(true);
   };
 
-  const handleSaveUser = async () => {
+  const handleSaveUser = () => {
     if (!selectedUser) return;
-
-    try {
-      const response = await fetch(`/api/users/${selectedUser._id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          fullName: selectedUser.fullName,
-          admissionNumber: selectedUser.admissionNumber,
-          email: selectedUser.email,
-          role: selectedUser.role,
-          class: selectedUser.class,
-          campus: selectedUser.campus
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to update user');
-      }
-
-      await fetchUsers();
-      setIsDialogOpen(false);
-      toast.success('User updated successfully');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to update user';
-      toast.error(message);
-      console.error('Error updating user:', error);
-    }
+    updateMutation.mutate({ id: selectedUser._id, data: {
+      fullName: selectedUser.fullName, admissionNumber: selectedUser.admissionNumber,
+      email: selectedUser.email, role: selectedUser.role,
+      class: selectedUser.class, campus: selectedUser.campus
+    }});
   };
 
-  const handleCreateUser = async () => {
-    if (!newUser.fullName || !newUser.admissionNumber) {
-      toast.error('Please fill all required fields');
-      return;
-    }
-
-    try {
-      const userData = {
-        ...newUser,
-        password: '123456',
-        email: `${newUser.admissionNumber.toLowerCase()}@school.com`
-      };
-
-      const response = await fetch('/api/users', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(userData),
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to create user');
-      }
-
-      await fetchUsers();
-      setIsAddDialogOpen(false);
-      setNewUser({
-        fullName: '',
-        admissionNumber: '',
-        role: 'student',
-        class: '8' as User['class'],
-        campus: 'Main' as User['campus'],
-      });
-      toast.success('User added successfully');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to create user';
-      toast.error(message);
-      console.error('Error creating user:', error);
-    }
+  const handleCreateUser = () => {
+    if (!newUser.fullName || !newUser.admissionNumber) { toast.error('Please fill all required fields'); return; }
+    createMutation.mutate({ ...newUser, password: '123456', email: `${newUser.admissionNumber.toLowerCase()}@school.com` });
   };
 
-  const handleDeleteUser = async (userId: string) => {
-    try {
-      const response = await fetch(`/api/users/${userId}`, {
-        method: 'DELETE',
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to delete user');
-      }
-
-      await fetchUsers();
-      toast.success('User deleted successfully');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to delete user';
-      toast.error(message);
-      console.error('Error deleting user:', error);
-    }
-  };
+  const handleDeleteUser = (userId: string) => deleteMutation.mutate(userId);
 
   const handleExportCSV = () => {
     const exportData = filteredUsers.map(user => ({
-      'First Name': user.fullName.split(' ')[0],
-      'Last Name': user.fullName.split(' ')[1],
-      'Email': user.email,
-      'Admission Number': user.admissionNumber,
-      'Role': user.role,
-      'Class': user.class,
-      'Campus': user.campus
+      'First Name': user.fullName?.split(' ')[0] || '',
+      'Last Name': user.fullName?.split(' ')[1] || '',
+      'Email': user.email || '',
+      'Admission Number': user.admissionNumber || '',
+      'Role': user.role || '',
+      'Class': user.class || '',
+      'Campus': user.campus || ''
     }));
     
     exportToCSV(exportData, 'users.csv');
@@ -204,13 +126,13 @@ const UsersPage = () => {
 
   const handleExportPDF = () => {
     const exportData = filteredUsers.map(user => ({
-      'First Name': user.fullName.split(' ')[0],
-      'Last Name': user.fullName.split(' ')[1],
-      'Email': user.email,
-      'Admission Number': user.admissionNumber,
-      'Role': user.role,
-      'Class': user.class,
-      'Campus': user.campus
+      'First Name': user.fullName?.split(' ')[0] || '',
+      'Last Name': user.fullName?.split(' ')[1] || '',
+      'Email': user.email || '',
+      'Admission Number': user.admissionNumber || '',
+      'Role': user.role || '',
+      'Class': user.class || '',
+      'Campus': user.campus || ''
     }));
     
     exportToPDF(exportData, 'users.pdf', 'Users Report');
@@ -298,11 +220,11 @@ const UsersPage = () => {
                   filteredUsers.map((user, index) => (
                     <TableRow key={user._id}>
                       <TableCell>{index + 1}</TableCell>
-                      <TableCell>{user.fullName}</TableCell>
-                      <TableCell>{user.admissionNumber}</TableCell>
-                      <TableCell>{user.email}</TableCell>
-                      <TableCell>{user.class}</TableCell>
-                      <TableCell>{user.campus}</TableCell>
+                      <TableCell>{user.fullName || 'N/A'}</TableCell>
+                      <TableCell>{user.admissionNumber || 'N/A'}</TableCell>
+                      <TableCell>{user.email || 'N/A'}</TableCell>
+                      <TableCell>{user.class || 'N/A'}</TableCell>
+                      <TableCell>{user.campus || 'N/A'}</TableCell>
                       <TableCell>
                         <span className={
                           user.role === 'admin' 
@@ -311,7 +233,7 @@ const UsersPage = () => {
                               ? 'text-blue-600 font-medium'
                               : 'text-green-600 font-medium'
                         }>
-                          {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                          {user.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'N/A'}
                         </span>
                       </TableCell>
                       <TableCell className="text-right">

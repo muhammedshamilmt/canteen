@@ -42,7 +42,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const db = client.db("canteen-tracker-app");
+    const db = client.db();
 
     // Check if user exists with this email
     let user;

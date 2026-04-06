@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
 import { Mail, Loader2 } from 'lucide-react';
+import Link from 'next/link';
 
 const ForgotPassword = () => {
   const [email, setEmail] = useState('');

@@ -3,18 +3,13 @@ import { MongoClient } from 'mongodb';
 import { ObjectId } from 'mongodb';
 
 // MongoDB connection string
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/canteen-tracker-app';
-
-// Generate a random 6-digit OTP
-function generateOTP() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
+const MONGODB_URI = process.env.MONGODB_URI 
 
 // Connect to MongoDB
 async function connectToDatabase() {
   try {
     const client = await MongoClient.connect(MONGODB_URI);
-    const db = client.db('canteen-tracker-app');
+    const db = client.db();
     return { client, db };
   } catch (error) {
     console.error('MongoDB connection error:', error);

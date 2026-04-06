@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -14,104 +16,56 @@ interface MealTotalsCardProps {
   } | null;
 }
 
+const mealTimes = [
+  { id: 'coffee',    label: 'Coffee',    icon: Coffee },
+  { id: 'breakfast', label: 'Breakfast', icon: Egg },
+  { id: 'lunch',     label: 'Lunch',     icon: Sandwich },
+  { id: 'tea',       label: 'Tea',       icon: CupSoda },
+  { id: 'dinner',    label: 'Dinner',    icon: Utensils },
+];
+
+const mealColors = {
+  coffee:    { bg: 'bg-blue-50',   border: 'border-blue-200',   icon: 'text-blue-600',   badge: 'bg-blue-100 text-blue-800' },
+  breakfast: { bg: 'bg-green-50',  border: 'border-green-200',  icon: 'text-green-600',  badge: 'bg-green-100 text-green-800' },
+  lunch:     { bg: 'bg-yellow-50', border: 'border-yellow-200', icon: 'text-yellow-600', badge: 'bg-yellow-100 text-yellow-800' },
+  tea:       { bg: 'bg-purple-50', border: 'border-purple-200', icon: 'text-purple-600', badge: 'bg-purple-100 text-purple-800' },
+  dinner:    { bg: 'bg-red-50',    border: 'border-red-200',    icon: 'text-red-600',    badge: 'bg-red-100 text-red-800' },
+};
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.2 } },
+};
+
+const cardVariants = {
+  hidden: { opacity: 0, y: 50, scale: 0.9 },
+  visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.5, ease: 'easeOut' } },
+};
+
 const MealTotalsCard: React.FC<MealTotalsCardProps> = ({ attendanceSummary }) => {
-  const mealTimes = [
-    { id: 'coffee', label: 'Coffee', icon: Coffee },
-    { id: 'breakfast', label: 'Breakfast', icon: Egg },
-    { id: 'lunch', label: 'Lunch', icon: Sandwich },
-    { id: 'tea', label: 'Tea', icon: CupSoda },
-    { id: 'dinner', label: 'Dinner', icon: Utensils },
-  ];
-
-  const mealColors = {
-    coffee: {
-      bg: 'bg-blue-50',
-      border: 'border-blue-200',
-      icon: 'text-blue-600',
-      badge: 'bg-blue-100 text-blue-800'
-    },
-    breakfast: {
-      bg: 'bg-green-50',
-      border: 'border-green-200',
-      icon: 'text-green-600',
-      badge: 'bg-green-100 text-green-800'
-    },
-    lunch: {
-      bg: 'bg-yellow-50',
-      border: 'border-yellow-200',
-      icon: 'text-yellow-600',
-      badge: 'bg-yellow-100 text-yellow-800'
-    },
-    tea: {
-      bg: 'bg-purple-50',
-      border: 'border-purple-200',
-      icon: 'text-purple-600',
-      badge: 'bg-purple-100 text-purple-800'
-    },
-    dinner: {
-      bg: 'bg-red-50',
-      border: 'border-red-200',
-      icon: 'text-red-600',
-      badge: 'bg-red-100 text-red-800'
-    }
-  };
-
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.2
-      }
-    }
-  };
-
-  const cardVariants = {
-    hidden: { 
-      opacity: 0,
-      y: 50,
-      scale: 0.9
-    },
-    visible: {
-      opacity: 1,
-      y: 0,
-      scale: 1,
-      transition: {
-        duration: 0.5,
-        ease: "easeOut"
-      }
-    }
-  };
-
-  if (!attendanceSummary) {
-    return null;
-  }
+  if (!attendanceSummary) return null;
 
   return (
-    <motion.div 
+    <motion.div
       className="grid grid-cols-1 md:grid-cols-5 gap-4"
       variants={containerVariants}
       initial="hidden"
       whileInView="visible"
-      viewport={{ once: true, margin: "-100px" }}
+      viewport={{ once: true, margin: '-100px' }}
     >
       {mealTimes.map((meal, index) => {
         const mealData = attendanceSummary[meal.id as keyof typeof attendanceSummary];
         const totalPresent = mealData?.present || 0;
-        const totalAbsent = mealData?.absent || 0;
-        const totalSick = mealData?.sick || 0;
+        const totalAbsent  = mealData?.absent  || 0;
+        const totalSick    = mealData?.sick    || 0;
         const totalStudents = totalPresent + totalAbsent + totalSick;
-
         const colors = mealColors[meal.id as keyof typeof mealColors];
 
         return (
           <motion.div
             key={meal.id}
             variants={cardVariants}
-            whileHover={{ 
-              scale: 1.05,
-              transition: { duration: 0.2 }
-            }}
+            whileHover={{ scale: 1.05, transition: { duration: 0.2 } }}
           >
             <Card className={`${colors.bg} ${colors.border} hover:shadow-md transition-shadow`}>
               <CardContent className="pt-6">
@@ -148,4 +102,4 @@ const MealTotalsCard: React.FC<MealTotalsCardProps> = ({ attendanceSummary }) =>
   );
 };
 
-export default MealTotalsCard; 
+export default MealTotalsCard;
