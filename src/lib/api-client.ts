@@ -7,7 +7,10 @@ type RequestCache = {
 const requestCache = new Map<string, RequestCache>();
 const responseCache = new Map<string, { data: any; timestamp: number; etag?: string }>();
 const DEDUP_WINDOW = 100; // 100ms deduplication window
-const CACHE_DURATION = 60000; // 1 minute in-memory cache
+const CACHE_DURATION = 5000; // 5s in-memory cache (short — React Query is the real cache layer)
+
+// Endpoints that should never be served from cache (always fresh)
+const NO_CACHE_PATTERNS = ['/api/attendance', '/api/admin/overview', '/api/users'];
 
 export class ApiClient {
   private static instance: ApiClient;
@@ -30,7 +33,9 @@ export class ApiClient {
     return `${method}:${url}:${body}`;
   }
 
-  private getFromCache(cacheKey: string): any | null {
+  private getFromCache(cacheKey: string, url: string): any | null {
+    // Skip cache for real-time endpoints
+    if (NO_CACHE_PATTERNS.some(p => url.includes(p))) return null;
     const cached = responseCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
       return cached.data;
@@ -52,7 +57,7 @@ export class ApiClient {
     
     // For GET requests, check in-memory cache first
     if (!options?.method || options.method === 'GET') {
-      const cachedData = this.getFromCache(cacheKey);
+      const cachedData = this.getFromCache(cacheKey, url);
       if (cachedData) {
         return new Response(JSON.stringify(cachedData), {
           status: 200,

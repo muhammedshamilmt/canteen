@@ -38,13 +38,15 @@ const SignupForm = () => {
     }
 
     try {
-      const response = await fetch('/api/users', {
+      const response = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           admissionNumber,
+          firstName: fullName.split(' ')[0],
+          lastName: fullName.split(' ').slice(1).join(' ') || '',
           fullName,
           email,
           password,
@@ -59,17 +61,17 @@ const SignupForm = () => {
 
       toast.success('Account created successfully!');
       
-      // Store user info in localStorage
-      localStorage.setItem('user', JSON.stringify({ 
+      // Store user info in localStorage using the returned user data
+      localStorage.setItem('user', JSON.stringify({
+        ...data.user,
         admissionNumber,
         fullName,
         email,
         role: 'student',
-        isLoggedIn: true 
+        isLoggedIn: true,
       }));
       
-      // Navigate to tables page after signup
-      router.push('/tables');
+      router.push('/userprofile');
     } catch (error) {
       if (error instanceof Error) {
         toast.error(error.message);

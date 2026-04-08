@@ -47,11 +47,11 @@ const LoginForm = () => {
       // Redirect based on role
       setTimeout(() => {
         if (data.user.role === 'admin') {
-          router.push('/');
+          router.push('/admin/dashboard');
         } else {
-          router.push('/tables');
+          router.push('/userprofile');
         }
-      }, 1000);
+      }, 500);
 
     } catch (error) {
       if (error instanceof Error) {

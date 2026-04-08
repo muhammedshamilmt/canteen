@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api-client';
 import { Input } from '@/components/ui/input';
@@ -9,20 +9,37 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
-import { Settings as SettingsIcon, Loader2 } from 'lucide-react';
+import { Settings as SettingsIcon, Loader2, Clock } from 'lucide-react';
+
+const DEFAULTS = {
+  email: '', currentPassword: '', newPassword: '', confirmPassword: '',
+  allowPublicTableView: true, enableNotifications: true, darkMode: false,
+  numberOfTables: 10,
+  attendanceLockStart: '',
+  attendanceLockEnd: '',
+};
 
 const SettingsPage = () => {
-  const [localSettings, setLocalSettings] = useState({
-    email: '', currentPassword: '', newPassword: '', confirmPassword: '',
-    allowPublicTableView: true, enableNotifications: true, darkMode: false, numberOfTables: 10,
-  });
+  const [localSettings, setLocalSettings] = useState(DEFAULTS);
 
-  const { isLoading } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['settings'],
     queryFn: () => apiClient.get<any>('/api/settings'),
     staleTime: 10 * 60 * 1000,
-    onSuccess: (data: any) => setLocalSettings(prev => ({ ...prev, ...data, currentPassword: '', newPassword: '', confirmPassword: '' })),
-  } as any);
+  });
+
+  // Populate form when data arrives
+  useEffect(() => {
+    if (data) {
+      setLocalSettings(prev => ({
+        ...prev,
+        ...data,
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: '',
+      }));
+    }
+  }, [data]);
 
   const saveMutation = useMutation({
     mutationFn: (data: any) => apiClient.put('/api/settings', data),
@@ -31,6 +48,16 @@ const SettingsPage = () => {
   });
 
   const set = (field: string, value: any) => setLocalSettings(p => ({ ...p, [field]: value }));
+
+  const isValidLockWindow = () => {
+    const { attendanceLockStart, attendanceLockEnd } = localSettings;
+    // Both empty = disabled (valid)
+    if (!attendanceLockStart && !attendanceLockEnd) return true;
+    // Both must be set
+    if (!attendanceLockStart || !attendanceLockEnd) return false;
+    // Start must differ from end (overnight spans like 18:00–00:00 are allowed)
+    return attendanceLockStart !== attendanceLockEnd;
+  };
 
   if (isLoading) return (
     <div className="flex items-center justify-center h-[calc(100vh-4rem)]">
@@ -78,8 +105,64 @@ const SettingsPage = () => {
             </div>
             <p className="text-sm text-muted-foreground">Set the total number of tables in the canteen</p>
           </div>
+          <Separator />
+
+          {/* Attendance Lock Window */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-orange-500" />
+              <h3 className="font-medium">Attendance Lock Window</h3>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Students cannot mark or change their attendance during this time window. Leave both empty to disable.
+            </p>
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="space-y-1">
+                <Label htmlFor="lockStart">From</Label>
+                <Input
+                  id="lockStart"
+                  type="time"
+                  value={localSettings.attendanceLockStart}
+                  onChange={e => set('attendanceLockStart', e.target.value)}
+                  className="w-36"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="lockEnd">To</Label>
+                <Input
+                  id="lockEnd"
+                  type="time"
+                  value={localSettings.attendanceLockEnd}
+                  onChange={e => set('attendanceLockEnd', e.target.value)}
+                  className="w-36"
+                />
+              </div>
+              {localSettings.attendanceLockStart && localSettings.attendanceLockEnd && (
+                <div className="pt-5">
+                  <span className="text-sm px-3 py-1.5 rounded-full bg-orange-100 text-orange-700 font-medium">
+                    Locked {localSettings.attendanceLockStart} – {localSettings.attendanceLockEnd}
+                  </span>
+                </div>
+              )}
+            </div>
+            {!isValidLockWindow() && (
+              <p className="text-sm text-red-500">Both start and end times are required.</p>
+            )}
+            {localSettings.attendanceLockStart && localSettings.attendanceLockEnd && (
+              <button
+                onClick={() => { set('attendanceLockStart', ''); set('attendanceLockEnd', ''); }}
+                className="text-xs text-gray-400 hover:text-red-500 underline"
+              >
+                Clear lock window
+              </button>
+            )}
+          </div>
+
           <div className="pt-2">
-            <Button onClick={() => saveMutation.mutate(localSettings)} disabled={saveMutation.isPending}>
+            <Button
+              onClick={() => saveMutation.mutate(localSettings)}
+              disabled={saveMutation.isPending || !isValidLockWindow()}
+            >
               {saveMutation.isPending
                 ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving...</>
                 : <><SettingsIcon className="h-4 w-4 mr-2" />Save Settings</>}

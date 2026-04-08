@@ -18,6 +18,7 @@ export async function GET() {
     const students = allStudents.map(s => {
       const user = userMap.get(s.admissionNumber);
       const isSick = user?.isSick || false;
+      const nextDay = user?.nextDayAttendance;
 
       return {
         _id: s._id.toString(),
@@ -30,13 +31,20 @@ export async function GET() {
         attendance: Object.fromEntries(
           MEALS.map(meal => [
             meal,
-            {
-              present: isSick
-                ? false
-                : (user?.attendance?.[meal]?.present ?? true),
-            },
+            { present: isSick ? false : (user?.attendance?.[meal]?.present ?? true) },
           ])
         ),
+        nextDayAttendance: nextDay
+          ? {
+              isSick: nextDay.isSick ?? isSick,
+              ...Object.fromEntries(
+                MEALS.map(meal => [
+                  meal,
+                  { present: (nextDay.isSick ?? isSick) ? false : (nextDay[meal]?.present ?? user?.attendance?.[meal]?.present ?? true) },
+                ])
+              ),
+            }
+          : undefined,
       };
     });
 

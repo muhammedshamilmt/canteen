@@ -15,6 +15,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api-client';
 import * as XLSX from 'xlsx';
 import { invalidateAfterMutation } from '@/lib/cache-invalidate';
+import { PaginationControls } from '@/components/ui/pagination-controls';
+
+const PAGE_SIZE = 20;
 
 interface Student {
   _id?: string;
@@ -37,6 +40,7 @@ const StudentsPage = () => {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedClass, setSelectedClass] = useState<string>('all');
   const [selectedCampus, setSelectedCampus] = useState<string>('all');
+  const [page, setPage] = useState(1);
   const [newStudent, setNewStudent] = useState<Omit<Student, '_id'>>({
     firstName: '', lastName: '', admissionNumber: '', phoneNumber: '',
     class: '8', campus: 'dawa academy', tableNumber: 1, isPresent: false
@@ -153,6 +157,9 @@ const StudentsPage = () => {
     return matchesSearch && matchesClass && matchesCampus;
   });
 
+  const totalPages = Math.ceil(filteredStudents.length / PAGE_SIZE);
+  const pagedStudents = filteredStudents.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   const handleEditClick = (student: Student) => {
     setSelectedStudent({...student});
     setIsDialogOpen(true);
@@ -265,13 +272,13 @@ const StudentsPage = () => {
                   placeholder="Search students..."
                   className="pl-8"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
                 />
               </div>
               <select
                 className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 value={selectedClass}
-                onChange={(e) => setSelectedClass(e.target.value)}
+                onChange={(e) => { setSelectedClass(e.target.value); setPage(1); }}
               >
                 <option value="all">All Classes</option>
                 {AVAILABLE_CLASSES.map((cls) => (
@@ -281,7 +288,7 @@ const StudentsPage = () => {
               <select
                 className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 value={selectedCampus}
-                onChange={(e) => setSelectedCampus(e.target.value)}
+                onChange={(e) => { setSelectedCampus(e.target.value); setPage(1); }}
               >
                 <option value="all">All Campuses</option>
                 {AVAILABLE_CAMPUSES.map((campus) => (
@@ -307,10 +314,10 @@ const StudentsPage = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredStudents.length > 0 ? (
-                  filteredStudents.map((student, index) => (
+                {pagedStudents.length > 0 ? (
+                  pagedStudents.map((student, index) => (
                     <TableRow key={student._id}>
-                      <TableCell>{index + 1}</TableCell>
+                      <TableCell>{(page - 1) * PAGE_SIZE + index + 1}</TableCell>
                       <TableCell>{student.firstName}</TableCell>
                       <TableCell>{student.lastName}</TableCell>
                       <TableCell>{student.admissionNumber}</TableCell>
@@ -351,6 +358,13 @@ const StudentsPage = () => {
                 )}
               </TableBody>
             </Table>
+            <PaginationControls
+              page={page}
+              totalPages={totalPages}
+              totalItems={filteredStudents.length}
+              pageSize={PAGE_SIZE}
+              onPageChange={setPage}
+            />
           </div>
         </CardContent>
       </Card>

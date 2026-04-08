@@ -13,6 +13,9 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { Search, Edit, Trash, Plus, FileDown, FileText } from 'lucide-react';
 import { exportToCSV, exportToPDF } from '@/utils/export';
+import { PaginationControls } from '@/components/ui/pagination-controls';
+
+const PAGE_SIZE = 20;
 
 interface User {
   _id: string;
@@ -39,6 +42,7 @@ const UsersPage = () => {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedClass, setSelectedClass] = useState<string>('all');
   const [selectedCampus, setSelectedCampus] = useState<string>('all');
+  const [page, setPage] = useState(1);
   const [newUser, setNewUser] = useState({
     fullName: '', admissionNumber: '', role: 'student',
     class: '8' as User['class'], campus: 'Main' as User['campus'],
@@ -83,6 +87,9 @@ const UsersPage = () => {
     
     return matchesSearch && matchesClass && matchesCampus;
   });
+
+  const totalPages = Math.ceil(filteredUsers.length / PAGE_SIZE);
+  const pagedUsers = filteredUsers.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const handleEditClick = (user: User) => {
     setSelectedUser({...user});
@@ -174,13 +181,13 @@ const UsersPage = () => {
                 placeholder="Search users..."
                 className="pl-8"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
               />
               </div>
               <select
                 className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 value={selectedClass}
-                onChange={(e) => setSelectedClass(e.target.value)}
+                onChange={(e) => { setSelectedClass(e.target.value); setPage(1); }}
               >
                 <option value="all">All Classes</option>
                 {AVAILABLE_CLASSES.map((cls) => (
@@ -190,7 +197,7 @@ const UsersPage = () => {
               <select
                 className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 value={selectedCampus}
-                onChange={(e) => setSelectedCampus(e.target.value)}
+                onChange={(e) => { setSelectedCampus(e.target.value); setPage(1); }}
               >
                 <option value="all">All Campuses</option>
                 {AVAILABLE_CAMPUSES.map((campus) => (
@@ -216,10 +223,10 @@ const UsersPage = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredUsers.length > 0 ? (
-                  filteredUsers.map((user, index) => (
+                {pagedUsers.length > 0 ? (
+                  pagedUsers.map((user, index) => (
                     <TableRow key={user._id}>
-                      <TableCell>{index + 1}</TableCell>
+                      <TableCell>{(page - 1) * PAGE_SIZE + index + 1}</TableCell>
                       <TableCell>{user.fullName || 'N/A'}</TableCell>
                       <TableCell>{user.admissionNumber || 'N/A'}</TableCell>
                       <TableCell>{user.email || 'N/A'}</TableCell>
@@ -264,6 +271,13 @@ const UsersPage = () => {
               </TableBody>
             </Table>
           </div>
+          <PaginationControls
+            page={page}
+            totalPages={totalPages}
+            totalItems={filteredUsers.length}
+            pageSize={PAGE_SIZE}
+            onPageChange={setPage}
+          />
         </CardContent>
       </Card>
       

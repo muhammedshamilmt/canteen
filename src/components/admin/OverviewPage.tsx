@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api-client';
-import { Coffee, Utensils, Moon, AlertCircle, Users, RefreshCw } from 'lucide-react';
+import { Coffee, AlertCircle, Users, RefreshCw, Calendar, CalendarDays } from 'lucide-react';
 
 const MEALS = ['coffee', 'breakfast', 'lunch', 'tea', 'dinner'] as const;
 type Meal = typeof MEALS[number];
@@ -29,6 +29,7 @@ interface Student {
   tableNumber: string | number;
   isSick: boolean;
   attendance: Record<Meal, { present: boolean }>;
+  nextDayAttendance?: Record<Meal, { present: boolean }> & { isSick?: boolean };
 }
 
 interface ClassBreakdown {
@@ -42,6 +43,13 @@ export default function AdminOverview() {
   const [selectedClass, setSelectedClass] = useState('all');
   const [selectedMeal, setSelectedMeal] = useState<Meal>('lunch');
   const [showAbsentOnly, setShowAbsentOnly] = useState(false);
+  const [activeDay, setActiveDay] = useState<'today' | 'tomorrow'>('today');
+
+  const getTomorrowLabel = () => {
+    const t = new Date(); t.setDate(t.getDate() + 1);
+    return t.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  };
+  const getTodayLabel = () => new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
   const { data, isLoading, refetch, isFetching } = useQuery<{
     students: Student[];
@@ -58,17 +66,27 @@ export default function AdminOverview() {
     return ['all', ...Array.from(set).sort()];
   }, [data]);
 
+  const getStudentStatus = (s: Student, meal: Meal) => {
+    if (activeDay === 'tomorrow') {
+      const nd = s.nextDayAttendance;
+      const isSickTomorrow = nd?.isSick ?? s.isSick;
+      const presentTomorrow = nd?.[meal]?.present ?? s.attendance[meal]?.present ?? true;
+      return { isSick: isSickTomorrow, isPresent: !isSickTomorrow && presentTomorrow };
+    }
+    return { isSick: s.isSick, isPresent: !s.isSick && (s.attendance[meal]?.present ?? true) };
+  };
+
   const filtered = useMemo(() => {
     if (!data) return [];
     return data.students.filter(s => {
       if (selectedClass !== 'all' && s.class !== selectedClass) return false;
       if (showAbsentOnly) {
-        const absent = s.isSick || !s.attendance[selectedMeal]?.present;
-        if (!absent) return false;
+        const { isSick, isPresent } = getStudentStatus(s, selectedMeal);
+        if (!isSick && isPresent) return false;
       }
       return true;
     });
-  }, [data, selectedClass, selectedMeal, showAbsentOnly]);
+  }, [data, selectedClass, selectedMeal, showAbsentOnly, activeDay]);
 
   const mealTotals = useMemo(() => {
     if (!data) return {} as Record<Meal, { present: number; absent: number; sick: number }>;
@@ -77,13 +95,14 @@ export default function AdminOverview() {
     for (const meal of MEALS) {
       result[meal] = { present: 0, absent: 0, sick: 0 };
       for (const s of src) {
-        if (s.isSick) result[meal].sick++;
-        else if (s.attendance[meal]?.present) result[meal].present++;
+        const { isSick, isPresent } = getStudentStatus(s, meal);
+        if (isSick) result[meal].sick++;
+        else if (isPresent) result[meal].present++;
         else result[meal].absent++;
       }
     }
     return result;
-  }, [data, selectedClass]);
+  }, [data, selectedClass, activeDay]);
 
   return (
     <div className="space-y-6 p-6">
@@ -93,13 +112,36 @@ export default function AdminOverview() {
           <h1 className="text-2xl font-bold text-gray-900">Attendance Overview</h1>
           <p className="text-sm text-gray-500 mt-0.5">All students with real-time attendance status</p>
         </div>
-        <button
-          onClick={() => refetch()}
-          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-emerald-600 transition-colors"
-        >
-          <RefreshCw size={15} className={isFetching ? 'animate-spin' : ''} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Day toggle */}
+          <div className="flex rounded-lg border overflow-hidden text-sm">
+            <button
+              onClick={() => setActiveDay('today')}
+              className={`flex items-center gap-1.5 px-3 py-2 font-medium transition-colors ${
+                activeDay === 'today' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              <Calendar size={13} />
+              Today
+            </button>
+            <button
+              onClick={() => setActiveDay('tomorrow')}
+              className={`flex items-center gap-1.5 px-3 py-2 font-medium transition-colors ${
+                activeDay === 'tomorrow' ? 'bg-orange-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              <CalendarDays size={13} />
+              Tomorrow
+            </button>
+          </div>
+          <button
+            onClick={() => refetch()}
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-emerald-600 transition-colors"
+          >
+            <RefreshCw size={15} className={isFetching ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Meal summary pills */}
@@ -230,8 +272,7 @@ export default function AdminOverview() {
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
           {filtered.map(student => {
-            const isPresent = !student.isSick && student.attendance[selectedMeal]?.present;
-            const isSick = student.isSick;
+            const { isSick, isPresent } = getStudentStatus(student, selectedMeal);
             const isAbsent = !isSick && !isPresent;
 
             const cardStyle = isSick

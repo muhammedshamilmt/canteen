@@ -1,61 +1,86 @@
 import { NextResponse } from 'next/server';
-import { connectToDatabase } from '@/lib/db';
+import clientPromise from '@/lib/mongodb';
 import bcrypt from 'bcryptjs';
 
 export async function POST(request: Request) {
   try {
-    const db = await connectToDatabase();
-    const { admissionNumber, password } = await request.json();
+    const body = await request.json();
+    const { admissionNumber, password } = body;
 
-    // Check if it's an admin login
+    if (!admissionNumber || !password) {
+      return NextResponse.json({ error: 'Admission number and password are required' }, { status: 400 });
+    }
+
+    // Admin login — plain env var comparison
     if (
       admissionNumber === process.env.ADMIN_EMAIL &&
       password === process.env.ADMIN_PASSWORD
     ) {
       return NextResponse.json({
-        success: true,
         user: {
-          email: admissionNumber,
+          admissionNumber: process.env.ADMIN_EMAIL,
+          email: process.env.ADMIN_EMAIL,
+          fullName: 'Admin',
           role: 'admin',
-          isLoggedIn: true
-        }
+          isLoggedIn: true,
+        },
+        message: 'Login successful',
       });
     }
 
-    // Find user by admission number
-    const user = await db.collection("users").findOne({ admissionNumber });
-    
+    const client = await clientPromise;
+    const db = client.db();
+
+    // Try admission number first, then email
+    const user = await db.collection('users').findOne({
+      $or: [
+        { admissionNumber: admissionNumber.trim() },
+        { email: admissionNumber.trim() },
+      ],
+    });
+
     if (!user) {
-      return NextResponse.json(
-        { error: 'Invalid admission number or password' },
-        { status: 401 }
-      );
+      console.log(`[login] No user found for: ${admissionNumber}`);
+      return NextResponse.json({ error: 'Invalid admission number or password' }, { status: 401 });
     }
 
-    // Verify password
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    
-    if (!isPasswordValid) {
-      return NextResponse.json(
-        { error: 'Invalid admission number or password' },
-        { status: 401 }
-      );
+    // Handle missing password field
+    if (!user.password) {
+      console.log(`[login] User ${admissionNumber} has no password set`);
+      return NextResponse.json({ error: 'Account not set up — please contact admin' }, { status: 401 });
     }
 
-    // Remove password from response
-    const { password: _, ...userWithoutPassword } = user;
+    // Support bcrypt hashes and legacy plain-text
+    let isValid = false;
+    if (user.password.startsWith('$2')) {
+      isValid = await bcrypt.compare(password, user.password);
+    } else {
+      isValid = user.password === password;
+      if (isValid) {
+        // Auto-upgrade to bcrypt
+        const hashed = await bcrypt.hash(password, 10);
+        await db.collection('users').updateOne(
+          { _id: user._id },
+          { $set: { password: hashed } }
+        );
+      }
+    }
+
+    if (!isValid) {
+      console.log(`[login] Wrong password for: ${admissionNumber}`);
+      return NextResponse.json({ error: 'Invalid admission number or password' }, { status: 401 });
+    }
+
+    const { password: _pw, ...safeUser } = user;
 
     return NextResponse.json({
-      user: userWithoutPassword,
-      message: 'Login successful'
+      user: { ...safeUser, _id: safeUser._id?.toString() },
+      message: 'Login successful',
     });
   } catch (error) {
-    console.error('Login error:', error);
-    const message = process.env.NODE_ENV === 'development' && error instanceof Error
-      ? error.message
-      : 'Login failed';
+    console.error('[login] Error:', error);
     return NextResponse.json(
-      { error: message },
+      { error: error instanceof Error ? error.message : 'Login failed' },
       { status: 500 }
     );
   }

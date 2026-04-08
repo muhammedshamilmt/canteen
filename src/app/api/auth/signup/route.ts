@@ -1,16 +1,21 @@
 import { NextResponse } from 'next/server';
-import { connectToDatabase } from '@/lib/db';
+import clientPromise from '@/lib/mongodb';
 import bcrypt from 'bcryptjs';
 
 export async function POST(request: Request) {
   try {
-    const { firstName, lastName, email, password, admissionNumber } = await request.json();
-    
-    const db = await connectToDatabase();
-    
-    // Check if user already exists with this email or admission number
+    const { firstName, lastName, fullName, email, password, admissionNumber } = await request.json();
+
+    if (!admissionNumber || !password || !email) {
+      return NextResponse.json({ error: 'Admission number, email and password are required' }, { status: 400 });
+    }
+
+    const client = await clientPromise;
+    const db = client.db();
+
+    // Check if user already exists
     const existingUser = await db.collection('users').findOne({
-      $or: [{ email }, { admissionNumber }]
+      $or: [{ email: email.trim() }, { admissionNumber: admissionNumber.trim() }],
     });
 
     if (existingUser) {
@@ -20,60 +25,61 @@ export async function POST(request: Request) {
       );
     }
 
-    // Find student in students collection to get table number
-    const student = await db.collection('students').findOne({ admissionNumber });
-    
+    // Find student record
+    const student = await db.collection('students').findOne({ admissionNumber: admissionNumber.trim() });
+
     if (!student) {
       return NextResponse.json(
-        { error: 'Student not found with this admission number' },
+        { error: 'Student not found with this admission number. Please contact admin.' },
         { status: 404 }
       );
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 12);
-    
-    // Create new user with table number
+
+    const resolvedFullName = fullName || `${firstName || ''} ${lastName || ''}`.trim();
+
     const newUser = {
-      firstName,
-      lastName,
-      email,
+      admissionNumber: admissionNumber.trim(),
+      fullName: resolvedFullName,
+      firstName: firstName || resolvedFullName.split(' ')[0] || '',
+      lastName: lastName || resolvedFullName.split(' ').slice(1).join(' ') || '',
+      email: email.trim(),
       password: hashedPassword,
-      admissionNumber,
-      tableNumber: student.tableNumber,
+      tableNumber: student.tableNumber || 1,
       role: 'student',
+      class: student.class || '',
+      campus: student.campus || '',
       isPresent: true,
+      isSick: false,
       attendance: {
-        coffee: true,
-        breakfast: true,
-        lunch: true,
-        tea: true,
-        dinner: true
+        coffee:    { present: true },
+        breakfast: { present: true },
+        lunch:     { present: true },
+        tea:       { present: true },
+        dinner:    { present: true },
       },
-      createdAt: new Date()
+      createdAt: new Date(),
     };
-    
-    // Insert the new user
+
     const result = await db.collection('users').insertOne(newUser);
-    
+
     if (!result.acknowledged) {
       throw new Error('Failed to create user account');
     }
 
-    // Remove sensitive data before sending response
     const { password: _, ...userWithoutPassword } = newUser;
-    
+
     return NextResponse.json({
       success: true,
       message: 'Account created successfully',
-      user: userWithoutPassword
+      user: userWithoutPassword,
     });
-    
   } catch (error) {
-    console.error('Signup error:', error);
+    console.error('[signup] Error:', error);
     return NextResponse.json(
-      { error: 'Failed to create account. Please try again.' },
+      { error: error instanceof Error ? error.message : 'Failed to create account' },
       { status: 500 }
     );
   }
-} 
+}

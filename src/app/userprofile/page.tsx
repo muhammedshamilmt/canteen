@@ -7,9 +7,22 @@ import Footer from '@/components/layout/Footer';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { Coffee, Egg, Sandwich, CupSoda, Utensils, Check, X } from 'lucide-react';
+import { Coffee, Egg, Sandwich, CupSoda, Utensils, Check, X, CalendarDays } from 'lucide-react';
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+
+interface MealAttendance {
+  present: boolean;
+}
+
+interface NextDayAttendance {
+  coffee?: MealAttendance;
+  breakfast?: MealAttendance;
+  lunch?: MealAttendance;
+  tea?: MealAttendance;
+  dinner?: MealAttendance;
+  isSick?: boolean;
+}
 
 interface User {
   admissionNumber: string;
@@ -19,16 +32,16 @@ interface User {
   class: string;
   campus: string;
   attendance: {
-    coffee: { present: boolean };
-    breakfast: { present: boolean };
-    lunch: { present: boolean };
-    tea: { present: boolean };
-    dinner: { present: boolean };
+    coffee: MealAttendance;
+    breakfast: MealAttendance;
+    lunch: MealAttendance;
+    tea: MealAttendance;
+    dinner: MealAttendance;
   };
   isSick?: boolean;
+  nextDayAttendance?: NextDayAttendance;
 }
 
-// Define meal times and their corresponding icons
 const mealTimes = [
   { id: 'coffee', label: 'Coffee', icon: Coffee },
   { id: 'breakfast', label: 'Breakfast', icon: Egg },
@@ -37,10 +50,17 @@ const mealTimes = [
   { id: 'dinner', label: 'Dinner', icon: Utensils },
 ];
 
+const getTomorrowLabel = () => {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return tomorrow.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+};
+
 const UserProfile = () => {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [lockMessage, setLockMessage] = useState<string>('');
 
   useEffect(() => {
     const storedUser = localStorage.getItem('user');
@@ -48,7 +68,6 @@ const UserProfile = () => {
       router.push('/login');
       return;
     }
-
     const userData = JSON.parse(storedUser);
     fetchUserData(userData.admissionNumber);
   }, [router]);
@@ -58,18 +77,17 @@ const UserProfile = () => {
       const response = await fetch(`/api/users?admissionNumber=${admissionNumber}`);
       if (!response.ok) throw new Error('Failed to fetch user data');
       const userData = await response.json();
-      
-      // Initialize attendance if it doesn't exist, setting all to present by default
+
       if (!userData.attendance) {
         userData.attendance = {
           coffee: { present: true },
           breakfast: { present: true },
           lunch: { present: true },
           tea: { present: true },
-          dinner: { present: true }
+          dinner: { present: true },
         };
       }
-      
+
       setUser(userData);
     } catch (error) {
       toast.error('Failed to load user data');
@@ -79,114 +97,74 @@ const UserProfile = () => {
     }
   };
 
-  const handleAttendanceClick = async (mealId: string) => {
-    if (!user || user.isSick) {
-      if (user?.isSick) {
-        toast.error('Cannot update attendance while marked as sick');
-      }
+  // Today attendance toggle — removed: students can only mark for tomorrow
+
+  // Tomorrow attendance toggle
+  const handleNextDayAttendanceClick = async (mealId: string) => {
+    if (!user) return;
+    const nextDay = user.nextDayAttendance || {};
+    const isSickTomorrow = nextDay.isSick ?? false;
+    if (isSickTomorrow) {
+      toast.error('Cannot update attendance while marked as sick for tomorrow');
       return;
     }
 
     try {
-      const currentStatus = getAttendanceStatus(mealId);
-      const updatedAttendance = {
-        ...user.attendance,
-        [mealId]: {
-          present: !currentStatus.present
-        }
-      };
+      // Current next-day status: if not set, inherit from today
+      const currentMeal = nextDay[mealId as keyof NextDayAttendance] as MealAttendance | undefined;
+      const todayStatus = user.attendance[mealId as keyof typeof user.attendance];
+      const currentPresent = currentMeal !== undefined ? currentMeal.present : todayStatus.present;
+      const newPresent = !currentPresent;
 
-      const response = await fetch('/api/users', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          admissionNumber: user.admissionNumber,
-          attendance: updatedAttendance
-        }),
+      const response = await fetch('/api/attendance/next-day', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admissionNumber: user.admissionNumber, meal: mealId, present: newPresent }),
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to update attendance');
+        const err = await response.json();
+        if (response.status === 403) setLockMessage(err.error);
+        throw new Error(err.error || 'Failed to update');
       }
+      setLockMessage('');
 
       setUser({
         ...user,
-        attendance: updatedAttendance
+        nextDayAttendance: {
+          ...nextDay,
+          [mealId]: { present: newPresent },
+        },
       });
 
-      toast.success(`Marked as ${!currentStatus.present ? 'present' : 'absent'} for ${mealTimes.find(m => m.id === mealId)?.label}`);
+      toast.success(`Tomorrow: marked as ${newPresent ? 'present' : 'absent'} for ${mealTimes.find(m => m.id === mealId)?.label}`);
     } catch (error) {
-      console.error('Error updating attendance:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to update attendance');
+      toast.error(error instanceof Error ? error.message : 'Failed to update tomorrow attendance');
     }
   };
 
-  const handleToggleSickStatus = async () => {
+  const handleToggleSickTomorrow = async () => {
     if (!user) return;
+    const nextDay = user.nextDayAttendance || {};
+    const currentlySickTomorrow = nextDay.isSick ?? false;
 
     try {
-      // First update the sick status in the users collection
-      const userResponse = await fetch('/api/users', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          admissionNumber: user.admissionNumber,
-          isSick: !user.isSick
-        }),
+      const response = await fetch('/api/attendance/next-day', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admissionNumber: user.admissionNumber, isSick: !currentlySickTomorrow }),
       });
-
-      if (!userResponse.ok) {
-        const errorData = await userResponse.json();
-        throw new Error(errorData.error || 'Failed to update sick status');
+      if (!response.ok) {
+        const err = await response.json();
+        if (response.status === 403) setLockMessage(err.error);
+        throw new Error(err.error || 'Failed to update');
       }
+      setLockMessage('');
 
-      // If marking as sick, update all attendance to present
-      if (!user.isSick) {
-        const updatedAttendance = {
-          coffee: { present: true },
-          breakfast: { present: true },
-          lunch: { present: true },
-          tea: { present: true },
-          dinner: { present: true }
-        };
-
-        const attendanceResponse = await fetch('/api/users', {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            admissionNumber: user.admissionNumber,
-            attendance: updatedAttendance
-          }),
-        });
-
-        if (!attendanceResponse.ok) {
-          const errorData = await attendanceResponse.json();
-          throw new Error(errorData.error || 'Failed to update attendance');
-        }
-
-        setUser(prev => ({
-          ...prev!,
-          attendance: updatedAttendance,
-          isSick: true
-        }));
-      } else {
-        setUser(prev => ({
-          ...prev!,
-          isSick: false
-        }));
-      }
-
-      toast.success(`You are now marked as ${user.isSick ? 'not sick' : 'sick'}`);
+      setUser({ ...user, nextDayAttendance: { ...nextDay, isSick: !currentlySickTomorrow } });
+      toast.success(`Tomorrow: marked as ${!currentlySickTomorrow ? 'sick' : 'not sick'}`);
     } catch (error) {
-      console.error('Error updating sick status:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to update sick status');
+      toast.error(error instanceof Error ? error.message : 'Failed to update');
     }
   };
 
@@ -195,15 +173,13 @@ const UserProfile = () => {
     router.push('/login');
   };
 
-  const getAttendanceStatus = (meal: string) => {
-    if (!user || !user.attendance) return { present: false };
-    
-    const mealAttendance = user.attendance[meal as keyof typeof user.attendance];
-    if (!mealAttendance) return { present: false };
-    
-    return {
-      present: mealAttendance.present
-    };
+  const getNextDayStatus = (mealId: string): boolean => {
+    if (!user) return true;
+    const nextDay = user.nextDayAttendance;
+    const meal = nextDay?.[mealId as keyof NextDayAttendance] as MealAttendance | undefined;
+    if (meal !== undefined) return meal.present;
+    // Fall back to today's status if tomorrow not set
+    return user.attendance[mealId as keyof typeof user.attendance]?.present ?? true;
   };
 
   if (isLoading) {
@@ -216,16 +192,16 @@ const UserProfile = () => {
           </div>
           <div className="text-center">
             <h2 className="text-xl font-semibold text-gray-700">Loading Profile</h2>
-            <p className="text-sm text-gray-500 mt-1">Please wait while we fetch your information...</p>
+            <p className="text-sm text-gray-500 mt-1">Please wait...</p>
           </div>
         </div>
       </div>
     );
   }
 
-  if (!user) {
-    return null;
-  }
+  if (!user) return null;
+
+  const isSickTomorrow = user.nextDayAttendance?.isSick ?? false;
 
   return (
     <div className="flex flex-col">
@@ -233,112 +209,93 @@ const UserProfile = () => {
       <main className="flex-grow container mx-auto px-4 py-8">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold">User Profile</h1>
-          <Button variant="outline" onClick={handleLogout}>
-            Logout
-          </Button>
+          <Button variant="outline" onClick={handleLogout}>Logout</Button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* User Info Card */}
+          {/* Profile Info */}
           <Card className="md:col-span-1">
-            <CardHeader>
-              <CardTitle>Profile Information</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>Profile Information</CardTitle></CardHeader>
             <CardContent>
               <div className="space-y-4">
-                <div>
-                  <p className="text-sm text-gray-500">Name</p>
-                  <p className="font-medium">{user.fullName}</p>
+                <div><p className="text-sm text-gray-500">Name</p><p className="font-medium">{user.fullName}</p></div>
+                <div><p className="text-sm text-gray-500">Admission Number</p><p className="font-medium">{user.admissionNumber}</p></div>
+                <div><p className="text-sm text-gray-500">Email</p><p className="font-medium">{user.email}</p></div>
+                <div><p className="text-sm text-gray-500">Role</p><p className="font-medium capitalize">{user.role}</p></div>
+                <div><p className="text-sm text-gray-500">Class</p><p className="font-medium capitalize">{user.class}</p></div>
+                <div><p className="text-sm text-gray-500">Campus</p><p className="font-medium capitalize">{user.campus}</p></div>
+                <div className="flex items-center justify-between pt-2">
+                  <Label htmlFor="sick-tomorrow" className="text-sm text-gray-500">Mark as Sick (Tomorrow)</Label>
+                  <Switch
+                    id="sick-tomorrow"
+                    checked={isSickTomorrow}
+                    onCheckedChange={handleToggleSickTomorrow}
+                    className="data-[state=checked]:bg-orange-500"
+                  />
                 </div>
-                <div>
-                  <p className="text-sm text-gray-500">Admission Number</p>
-                  <p className="font-medium">{user.admissionNumber}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">Email</p>
-                  <p className="font-medium">{user.email}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">Role</p>
-                  <p className="font-medium capitalize">{user.role}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">Class</p>
-                  <p className="font-medium capitalize">{user.class}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">Campus</p>
-                  <p className="font-medium capitalize">{user.campus}</p>
-                </div>
-                {user.campus === 'dawa academy' && (
-                  <div className="flex items-center justify-between pt-2">
-                    <Label htmlFor="sick-status" className="text-sm text-gray-500">
-                      Mark as Sick
-                    </Label>
-                    <Switch
-                      id="sick-status"
-                      checked={user.isSick}
-                      onCheckedChange={handleToggleSickStatus}
-                      className="data-[state=checked]:bg-yellow-600"
-                    />
-                  </div>
-                )}
               </div>
             </CardContent>
           </Card>
 
-          {/* Attendance Settings Card */}
-          {!user.isSick && (
-            <Card className="md:col-span-2">
-              <CardHeader>
-                <CardTitle>Attendance Status</CardTitle>
-                <CardDescription>Click on a meal to toggle your attendance status</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {mealTimes.map((meal) => {
-                    const status = getAttendanceStatus(meal.id);
-                    return (
-                      <div 
-                        key={meal.id} 
-                        className={`p-4 border rounded-lg cursor-pointer transition-colors ${
-                          status.present
-                            ? 'bg-green-50 border-green-200 hover:bg-green-100' 
-                            : 'bg-red-50 border-red-200 hover:bg-red-100'
-                        }`}
-                        onClick={() => handleAttendanceClick(meal.id)}
-                      >
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center">
-                            <meal.icon className="h-5 w-5 mr-3" />
-                            <h3 className="font-medium">{meal.label}</h3>
-                          </div>
-                          <div className="flex items-center">
-                            {status.present ? (
+          {/* Tomorrow's Attendance */}
+          <div className="md:col-span-2">
+            {!isSickTomorrow ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <CalendarDays className="h-5 w-5 text-orange-500" />
+                    Tomorrow&apos;s Attendance
+                  </CardTitle>
+                  <CardDescription>Pre-mark your meals for {getTomorrowLabel()}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {lockMessage && (
+                    <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center gap-2">
+                      <X className="h-4 w-4 shrink-0" />
+                      {lockMessage}
+                    </div>
+                  )}
+                  <div className="space-y-3">
+                    {mealTimes.map((meal) => {
+                      const present = getNextDayStatus(meal.id);
+                      return (
+                        <div
+                          key={meal.id}
+                          className={`p-4 border rounded-lg cursor-pointer transition-colors ${
+                            present ? 'bg-green-50 border-green-200 hover:bg-green-100' : 'bg-red-50 border-red-200 hover:bg-red-100'
+                          }`}
+                          onClick={() => handleNextDayAttendanceClick(meal.id)}
+                        >
+                          <div className="flex justify-between items-center">
+                            <div className="flex items-center">
+                              <meal.icon className="h-5 w-5 mr-3" />
+                              <span className="font-medium">{meal.label}</span>
+                            </div>
+                            {present ? (
                               <div className="flex items-center text-green-600">
-                                <Check className="h-5 w-5 mr-1" />
-                                <span className="font-medium">Present</span>
+                                <Check className="h-5 w-5 mr-1" /><span className="font-medium">Present</span>
                               </div>
                             ) : (
                               <div className="flex items-center text-red-600">
-                                <X className="h-5 w-5 mr-1" />
-                                <span className="font-medium">Absent</span>
+                                <X className="h-5 w-5 mr-1" /><span className="font-medium">Absent</span>
                               </div>
                             )}
-                            <div 
-                              className={`ml-3 w-3 h-3 rounded-full ${
-                                status.present ? 'bg-green-500' : 'bg-red-500'
-                              }`}
-                            ></div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="bg-orange-50 border-orange-200">
+                <CardContent className="pt-6 text-center text-orange-700">
+                  <p className="font-medium">You are marked as sick for tomorrow.</p>
+                  <p className="text-sm mt-1">Toggle the sick switch to change this.</p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </div>
       </main>
       <Footer />

@@ -1,7 +1,8 @@
 'use client';
 
 import { useParams, useRouter } from 'next/navigation';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient, QueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api-client';
 import { invalidateAfterMutation } from '@/lib/cache-invalidate';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -30,10 +31,16 @@ export default function StudentDetailPage() {
   const queryClient = useQueryClient();
   const id = params.id as string;
 
+  // Optimistic state for today's meals and sick status
+  const [optimisticMeals, setOptimisticMeals] = useState<Record<string, boolean>>({});
+  const [optimisticSick, setOptimisticSick] = useState<boolean | null>(null);
+
   const { data, isLoading, error } = useQuery({
     queryKey: ['student', id],
     queryFn: () => apiClient.get<any>(`/api/students/${id}`),
     staleTime: 2 * 60 * 1000,
+    // Reset optimistic state when fresh data arrives
+    select: (d) => d,
   });
 
   const attendanceMutation = useMutation({
@@ -47,7 +54,15 @@ export default function StudentDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['student', id] });
       invalidateAfterMutation(queryClient, 'attendance');
     },
-    onError: () => toast.error('Failed to update attendance'),
+    onError: (_, vars) => {
+      // Revert optimistic update
+      setOptimisticMeals(prev => {
+        const reverted = { ...prev };
+        delete reverted[vars.meal];
+        return reverted;
+      });
+      toast.error('Failed to update attendance');
+    },
   });
 
   const sickMutation = useMutation({
@@ -61,8 +76,27 @@ export default function StudentDetailPage() {
       invalidateAfterMutation(queryClient, 'attendance');
       toast.success(isSick ? 'Marked as sick' : 'Marked as active');
     },
-    onError: () => toast.error('Failed to update status'),
+    onError: () => {
+      setOptimisticSick(null);
+      toast.error('Failed to update status');
+    },
   });
+
+  const handleMealToggle = (meal: string, currentPresent: boolean) => {
+    const newPresent = !currentPresent;
+    // Instant optimistic update
+    setOptimisticMeals(prev => ({ ...prev, [meal]: newPresent }));
+    attendanceMutation.mutate({ meal, present: newPresent });
+    toast.success(`${meal} marked as ${newPresent ? 'present' : 'absent'}`);
+  };
+
+  const handleSickToggle = () => {
+    const current = optimisticSick !== null ? optimisticSick : (data?.user?.isSick ?? false);
+    const next = !current;
+    setOptimisticSick(next);
+    if (next) setOptimisticMeals({}); // clear meal overrides when marking sick
+    sickMutation.mutate(next);
+  };
 
   if (isLoading) {
     return <LoadingSkeleton />;
@@ -127,11 +161,13 @@ export default function StudentDetailPage() {
                   <h2 className="text-xl font-bold">{student.fullName}</h2>
                   <p className="text-gray-600">{student.admissionNumber}</p>
                   <Badge 
-                    variant={stats.currentStatus === 'sick' ? 'destructive' : 'default'}
-                    className="mt-2 cursor-pointer"
-                    onClick={() => sickMutation.mutate(!user?.isSick)}
+                    variant={(optimisticSick !== null ? optimisticSick : stats.currentStatus === 'sick') ? 'destructive' : 'default'}
+                    className="mt-2 cursor-pointer select-none"
+                    onClick={handleSickToggle}
                   >
-                    {stats.currentStatus === 'sick' ? '🤒 Sick — click to clear' : '✓ Active — click to mark sick'}
+                    {(optimisticSick !== null ? optimisticSick : stats.currentStatus === 'sick')
+                      ? '🤒 Sick — click to clear'
+                      : '✓ Active — click to mark sick'}
                   </Badge>
                 </div>
 
@@ -188,25 +224,23 @@ export default function StudentDetailPage() {
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
                   <span>Today's Meal Attendance</span>
-                  <span className="text-xs font-normal text-gray-400">Click to toggle absent/present</span>
+                  <span className="text-xs font-normal text-gray-400">Click to toggle</span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                   {['coffee', 'breakfast', 'lunch', 'tea', 'dinner'].map((meal) => {
-                    const isSick = user?.isSick;
-                    const isPresent = isSick ? false : (user?.attendance?.[meal]?.present ?? true);
+                    const isSick = optimisticSick !== null ? optimisticSick : (user?.isSick ?? false);
+                    const serverPresent = user?.attendance?.[meal]?.present ?? true;
+                    const isPresent = isSick ? false : (meal in optimisticMeals ? optimisticMeals[meal] : serverPresent);
                     const isAbsent = !isSick && !isPresent;
 
                     return (
                       <button
                         key={meal}
-                        disabled={isSick || attendanceMutation.isPending}
-                        onClick={() => {
-                          attendanceMutation.mutate({ meal, present: !isPresent });
-                          toast.success(`${meal} marked as ${isPresent ? 'absent' : 'present'}`);
-                        }}
-                        className={`p-3 rounded-xl border-2 text-center transition-all hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed ${
+                        disabled={isSick}
+                        onClick={() => !isSick && handleMealToggle(meal, isPresent)}
+                        className={`p-3 rounded-xl border-2 text-center transition-all hover:scale-105 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed ${
                           isSick
                             ? 'bg-orange-50 border-orange-200'
                             : isAbsent
@@ -227,7 +261,7 @@ export default function StudentDetailPage() {
                     );
                   })}
                 </div>
-                {user?.isSick && (
+                {(optimisticSick !== null ? optimisticSick : user?.isSick) && (
                   <p className="text-xs text-orange-500 mt-3 text-center">
                     Student is marked sick — click the status badge above to clear
                   </p>
@@ -262,18 +296,12 @@ export default function StudentDetailPage() {
                 <CardTitle>Attendance History (Last 30 Days)</CardTitle>
               </CardHeader>
               <CardContent>
-                {attendanceHistory && attendanceHistory.length > 0 ? (
-                  <div className="space-y-2">
-                    {attendanceHistory.map((record: any, index: number) => (
-                      <AttendanceHistoryItem key={index} record={record} />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-gray-500">
-                    <Calendar className="mx-auto h-12 w-12 mb-2 opacity-50" />
-                    <p>No attendance history found</p>
-                  </div>
-                )}
+                <AttendanceHistoryList
+                  history={attendanceHistory}
+                  admissionNumber={data?.student?.admissionNumber}
+                  queryClient={queryClient}
+                  studentId={id}
+                />
               </CardContent>
             </Card>
           </div>
@@ -322,6 +350,142 @@ function LeaveHistoryItem({ leave }: { leave: any }) {
           <p className="text-sm text-gray-500 mt-1">{leave.notes}</p>
         )}
       </div>
+    </div>
+  );
+}
+
+function AbsentFilterToggle() {
+  // This is a display-only component; state is lifted via a module-level ref trick.
+  // We use a custom event to communicate with AttendanceHistoryList.
+  return null; // rendered inline in AttendanceHistoryList
+}
+
+function AttendanceHistoryList({
+  history,
+  admissionNumber,
+  queryClient,
+  studentId,
+}: {
+  history: any[];
+  admissionNumber: string;
+  queryClient: QueryClient;
+  studentId: string;
+}) {
+  const [absentOnly, setAbsentOnly] = useState(false);
+  const [optimisticUpdates, setOptimisticUpdates] = useState<Record<string, Record<string, boolean>>>({});
+
+  const toggleMeal = async (date: string, meal: string, currentPresent: boolean) => {
+    const newPresent = !currentPresent;
+    // Optimistic update
+    setOptimisticUpdates(prev => ({
+      ...prev,
+      [date]: { ...(prev[date] || {}), [meal]: newPresent },
+    }));
+
+    try {
+      await fetch('/api/attendance/history', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admissionNumber, date, meal, present: newPresent }),
+      });
+      queryClient.invalidateQueries({ queryKey: ['student', studentId] });
+    } catch {
+      // Revert on error
+      setOptimisticUpdates(prev => ({
+        ...prev,
+        [date]: { ...(prev[date] || {}), [meal]: currentPresent },
+      }));
+    }
+  };
+
+  if (!history || history.length === 0) {
+    return (
+      <div className="text-center py-8 text-gray-500">
+        <Calendar className="mx-auto h-12 w-12 mb-2 opacity-50" />
+        <p>No attendance history found</p>
+      </div>
+    );
+  }
+
+  const MEALS = ['coffee', 'breakfast', 'lunch', 'tea', 'dinner'];
+
+  // Filter: absent-only means at least one meal was absent that day
+  const displayed = absentOnly
+    ? history.filter(r => Object.values(r.meals || {}).some(v => !v))
+    : history;
+
+  return (
+    <div className="space-y-3">
+      {/* Filter toggle */}
+      <div className="flex items-center justify-between pb-2 border-b">
+        <span className="text-sm text-gray-500">{displayed.length} day{displayed.length !== 1 ? 's' : ''} shown</span>
+        <button
+          onClick={() => setAbsentOnly(v => !v)}
+          className={`text-xs px-3 py-1.5 rounded-full font-medium transition-colors ${
+            absentOnly
+              ? 'bg-red-100 text-red-700 border border-red-200'
+              : 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200'
+          }`}
+        >
+          {absentOnly ? '✕ Absent days only' : 'Show absent days only'}
+        </button>
+      </div>
+
+      {displayed.length === 0 ? (
+        <div className="text-center py-6 text-gray-400 text-sm">No absent days found</div>
+      ) : (
+        displayed.map((record: any, index: number) => {
+          const dateKey = record.date;
+          const overrides = optimisticUpdates[dateKey] || {};
+          const meals = { ...(record.meals || {}), ...overrides };
+          const absentMeals = MEALS.filter(m => meals[m] === false);
+          const presentMeals = MEALS.filter(m => meals[m] !== false);
+
+          return (
+            <div key={index} className="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4 text-gray-500" />
+                  <p className="font-medium text-sm">
+                    {record.date && format(new Date(record.date), 'EEEE, MMM dd, yyyy')}
+                  </p>
+                </div>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                  absentMeals.length === 0
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : absentMeals.length === MEALS.length
+                    ? 'bg-red-100 text-red-700'
+                    : 'bg-orange-100 text-orange-700'
+                }`}>
+                  {presentMeals.length}/{MEALS.length} present
+                </span>
+              </div>
+
+              {/* Meal pills — click to toggle */}
+              <div className="flex gap-1.5 flex-wrap">
+                {MEALS.map(meal => {
+                  const present = meals[meal] !== false;
+                  return (
+                    <button
+                      key={meal}
+                      onClick={() => toggleMeal(dateKey, meal, present)}
+                      title={`${meal}: ${present ? 'Present — click to mark absent' : 'Absent — click to mark present'}`}
+                      className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all hover:scale-105 ${
+                        present
+                          ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                          : 'bg-red-100 text-red-600 border border-red-200'
+                      }`}
+                    >
+                      {MEAL_ICONS[meal]}
+                      <span className="capitalize">{meal}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })
+      )}
     </div>
   );
 }
