@@ -9,10 +9,15 @@ export async function GET() {
     const client = await clientPromise;
     const db = client.db();
 
-    // Total = students collection
-    const allStudents = await db.collection('students').find({}).toArray();
-    // Absence/sick = users collection
-    const allUsers = await db.collection('users').find({}).toArray();
+    const [allStudents, allUsers] = await Promise.all([
+      db.collection('students')
+        .find({}, { projection: { _id: 1, firstName: 1, lastName: 1, admissionNumber: 1, class: 1, campus: 1, tableNumber: 1 } })
+        .toArray(),
+      db.collection('users')
+        .find({}, { projection: { admissionNumber: 1, isSick: 1, attendance: 1, nextDayAttendance: 1 } })
+        .toArray(),
+    ]);
+
     const userMap = new Map(allUsers.map(u => [u.admissionNumber, u]));
 
     const students = allStudents.map(s => {

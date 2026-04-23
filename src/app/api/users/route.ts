@@ -126,7 +126,10 @@ export async function GET(request: Request) {
     }
 
     // Otherwise, return all users
-    const users = await db.collection("users").find({}).toArray();
+    const users = await db.collection('users')
+      .find({}, { projection: { password: 0 } })
+      .sort({ fullName: 1 })
+      .toArray();
     return NextResponse.json(users, {
       headers: addCacheHeaders({}, 'short')
     });

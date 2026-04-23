@@ -10,79 +10,70 @@ export async function GET() {
     const client = await clientPromise;
     const db = client.db();
 
-    // Total headcount comes from students collection
-    const allStudents = await db.collection('students').find({}).toArray();
+    // Fetch only needed fields
+    const [allStudents, allUsers] = await Promise.all([
+      db.collection('students')
+        .find({}, { projection: { _id: 1, firstName: 1, lastName: 1, admissionNumber: 1, campus: 1, class: 1 } })
+        .toArray(),
+      db.collection('users')
+        .find({}, { projection: { admissionNumber: 1, isSick: 1, attendance: 1 } })
+        .toArray(),
+    ]);
 
-    // Absence/sick data comes from users collection
-    const allUsers = await db.collection('users').find({}).toArray();
-
-    // Build a quick lookup: admissionNumber -> user
     const userMap = new Map(allUsers.map(u => [u.admissionNumber, u]));
 
-    const summary: Record<string, any> = {};
+    // Single pass over students — build all meal buckets at once
+    const buckets: Record<MealType, { present: any[]; absent: any[]; sick: any[]; campusTotals: Record<string, number> }> = {
+      coffee:    { present: [], absent: [], sick: [], campusTotals: {} },
+      breakfast: { present: [], absent: [], sick: [], campusTotals: {} },
+      lunch:     { present: [], absent: [], sick: [], campusTotals: {} },
+      tea:       { present: [], absent: [], sick: [], campusTotals: {} },
+      dinner:    { present: [], absent: [], sick: [], campusTotals: {} },
+    };
 
-    for (const meal of MEALS) {
-      const presentStudents: any[] = [];
-      const absentStudents: any[] = [];
-      const sickStudents: any[] = [];
-      const campusTotals: Record<string, number> = {};
+    const sickStudentList: any[] = [];
 
-      for (const student of allStudents) {
-        const campus = (student.campus || 'unknown').toLowerCase();
-        if (!campusTotals[campus]) campusTotals[campus] = 0;
+    for (const student of allStudents) {
+      const campus = (student.campus || 'unknown').toLowerCase();
+      const user = userMap.get(student.admissionNumber);
+      const info = {
+        id: student._id.toString(),
+        fullName: `${student.firstName || ''} ${student.lastName || ''}`.trim(),
+        class: student.class || '',
+        admissionNumber: student.admissionNumber || '',
+        campus,
+      };
 
-        const user = userMap.get(student.admissionNumber);
-
-        const info = {
-          id: student._id.toString(),
-          name: `${student.firstName || ''} ${student.lastName || ''}`.trim(),
-          fullName: `${student.firstName || ''} ${student.lastName || ''}`.trim(),
-          class: student.class || '',
-          admissionNumber: student.admissionNumber || '',
-          campus,
-        };
-
-        if (user?.isSick) {
-          // Sick — counts as absent for all meals
-          sickStudents.push(info);
-        } else if (user && user.attendance?.[meal]?.present === false) {
-          // Explicitly marked absent for this meal
-          absentStudents.push(info);
-        } else {
-          // Default: present (no user record or present=true)
-          presentStudents.push(info);
-          campusTotals[campus]++;
+      if (user?.isSick) {
+        sickStudentList.push(info);
+        for (const meal of MEALS) buckets[meal].sick.push(info);
+      } else {
+        for (const meal of MEALS) {
+          const b = buckets[meal];
+          if (user?.attendance?.[meal]?.present === false) {
+            b.absent.push(info);
+          } else {
+            b.present.push(info);
+            b.campusTotals[campus] = (b.campusTotals[campus] || 0) + 1;
+          }
         }
       }
-
-      summary[meal] = {
-        total: allStudents.length,
-        present: presentStudents.length,
-        absent: absentStudents.length,
-        sick: sickStudents.length,
-        presentStudents,
-        absentStudents,
-        sickStudents,
-        campusTotals,
-      };
     }
 
-    // Overall sick (from users, matched to students)
-    const sickUsers = allUsers.filter(u => u.isSick);
-    const sickStudentList = sickUsers
-      .map(u => {
-        const student = allStudents.find(s => s.admissionNumber === u.admissionNumber);
-        if (!student) return null;
-        return {
-          id: student._id.toString(),
-          name: `${student.firstName || ''} ${student.lastName || ''}`.trim(),
-          fullName: `${student.firstName || ''} ${student.lastName || ''}`.trim(),
-          class: student.class || '',
-          admissionNumber: student.admissionNumber || '',
-          campus: (student.campus || '').toLowerCase(),
-        };
-      })
-      .filter(Boolean);
+    const summary: Record<string, any> = {};
+    for (const meal of MEALS) {
+      const b = buckets[meal];
+      summary[meal] = {
+        total: allStudents.length,
+        present: b.present.length,
+        absent: b.absent.length,
+        sick: b.sick.length,
+        presentStudents: b.present,
+        absentStudents: b.absent,
+        sickStudents: b.sick,
+        campusTotals: b.campusTotals,
+      };
+    }
 
     summary.totalSick = sickStudentList.length;
     summary.sickStudents = sickStudentList;

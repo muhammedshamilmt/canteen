@@ -90,6 +90,8 @@ const StudentsPage = () => {
   const [importFileName, setImportFileName] = useState('');
   const [importResult, setImportResult] = useState<{ inserted: number; skipped: number; errors: string[] } | null>(null);
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  const [duplicateNums, setDuplicateNums] = useState<Set<string>>(new Set());
+  const [isCheckingDuplicates, setIsCheckingDuplicates] = useState(false);
 
   const importMutation = useMutation({
     mutationFn: (students: any[]) => apiClient.post('/api/students/import', { students }),
@@ -105,9 +107,10 @@ const StudentsPage = () => {
     if (!file) return;
     setImportFileName(file.name);
     setImportResult(null);
+    setDuplicateNums(new Set());
 
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       const data = evt.target?.result;
       const wb = XLSX.read(data, { type: 'binary' });
       const ws = wb.Sheets[wb.SheetNames[0]];
@@ -129,7 +132,35 @@ const StudentsPage = () => {
       }).filter(r => r.firstName);
 
       setImportPreview(normalized);
-      setSelectedRows(new Set(normalized.map((_: any, i: number) => i)));
+
+      // Check which admission numbers already exist
+      const admNums = normalized.map(r => r.admissionNumber || r.phoneNumber).filter(Boolean);
+      if (admNums.length > 0) {
+        setIsCheckingDuplicates(true);
+        try {
+          const res = await fetch('/api/students/check-duplicates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ admissionNumbers: admNums }),
+          });
+          const { existing } = await res.json();
+          const dupSet = new Set<string>(existing);
+          setDuplicateNums(dupSet);
+          // Auto-select only non-duplicates
+          const newSelected = new Set<number>();
+          normalized.forEach((r, i) => {
+            const num = r.admissionNumber || r.phoneNumber;
+            if (!dupSet.has(num)) newSelected.add(i);
+          });
+          setSelectedRows(newSelected);
+        } catch {
+          setSelectedRows(new Set(normalized.map((_: any, i: number) => i)));
+        } finally {
+          setIsCheckingDuplicates(false);
+        }
+      } else {
+        setSelectedRows(new Set(normalized.map((_: any, i: number) => i)));
+      }
     };
     reader.readAsBinaryString(file);
   };
@@ -595,7 +626,7 @@ const StudentsPage = () => {
       </Dialog>
 
       {/* Import Dialog */}
-      <Dialog open={isImportOpen} onOpenChange={v => { setIsImportOpen(v); if (!v) { setImportPreview([]); setImportResult(null); setImportFileName(''); setSelectedRows(new Set()); } }}>
+      <Dialog open={isImportOpen} onOpenChange={v => { setIsImportOpen(v); if (!v) { setImportPreview([]); setImportResult(null); setImportFileName(''); setSelectedRows(new Set()); setDuplicateNums(new Set()); } }}>
         <DialogContent className="sm:max-w-3xl max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -636,7 +667,20 @@ const StudentsPage = () => {
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-sm font-medium text-gray-700">
                     {importPreview.length} students detected
-                    <span className="ml-2 text-xs text-gray-400">({selectedRows.size} selected)</span>
+                    {isCheckingDuplicates ? (
+                      <span className="ml-2 text-xs text-gray-400">Checking duplicates...</span>
+                    ) : (
+                      <>
+                        <span className="ml-2 text-xs text-emerald-600 font-medium">
+                          {importPreview.filter((r, i) => !duplicateNums.has(r.admissionNumber || r.phoneNumber)).length} new
+                        </span>
+                        {duplicateNums.size > 0 && (
+                          <span className="ml-1 text-xs text-orange-500 font-medium">
+                            · {duplicateNums.size} duplicate{duplicateNums.size !== 1 ? 's' : ''} (auto-deselected)
+                          </span>
+                        )}
+                      </>
+                    )}
                   </p>
                   <div className="flex gap-2">
                     <button
@@ -684,13 +728,19 @@ const StudentsPage = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {importPreview.map((row, i) => (
-                          <tr key={i} className={`hover:bg-gray-50 transition-colors ${selectedRows.has(i) ? 'bg-emerald-50/40' : ''}`}>
+                        {importPreview.map((row, i) => {
+                          const admNum = row.admissionNumber || row.phoneNumber;
+                          const isDuplicate = duplicateNums.has(admNum);
+                          return (
+                          <tr key={i} className={`hover:bg-gray-50 transition-colors ${
+                            isDuplicate ? 'bg-orange-50/60 opacity-70' : selectedRows.has(i) ? 'bg-emerald-50/40' : ''
+                          }`}>
                             <td className="px-3 py-2">
                               <input
                                 type="checkbox"
                                 className="rounded"
                                 checked={selectedRows.has(i)}
+                                disabled={isDuplicate}
                                 onChange={e => {
                                   const next = new Set(selectedRows);
                                   e.target.checked ? next.add(i) : next.delete(i);
@@ -701,13 +751,18 @@ const StudentsPage = () => {
                             <td className="px-3 py-2 text-gray-400">{i + 1}</td>
                             <td className="px-3 py-2 font-medium text-gray-800">{row.firstName}</td>
                             <td className="px-3 py-2 text-gray-700">{row.lastName}</td>
-                            <td className="px-3 py-2 text-gray-600">{row.admissionNumber || row.phoneNumber || '—'}</td>
+                            <td className="px-3 py-2 text-gray-600">{admNum || '—'}</td>
                             <td className="px-3 py-2">
                               <span className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded text-[11px] font-medium">{row.class || '—'}</span>
                             </td>
                             <td className="px-3 py-2 text-gray-600 capitalize">{row.campus || '—'}</td>
                             <td className="px-3 py-2 text-gray-600">{row.tableNumber || 1}</td>
                             <td className="px-3 py-2">
+                              {isDuplicate ? (
+                                <span className="text-[11px] bg-orange-100 text-orange-600 px-2 py-1 rounded-md font-medium">
+                                  Duplicate
+                                </span>
+                              ) : (
                               <div className="flex gap-1">
                                 <button
                                   onClick={() => {
@@ -735,9 +790,11 @@ const StudentsPage = () => {
                                   Remove
                                 </button>
                               </div>
+                              )}
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

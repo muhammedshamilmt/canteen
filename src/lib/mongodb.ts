@@ -39,6 +39,19 @@ export async function getDatabase() {
   return client.db(dbName);
 }
 
+// Ensure indexes on first use (no-op if already exist)
+let indexesEnsured = false;
+export async function getDbWithIndexes() {
+  const client = await clientPromise;
+  const db = client.db(dbName);
+  if (!indexesEnsured) {
+    indexesEnsured = true;
+    // Fire and forget — don't block requests
+    import('./db-indexes').then(m => m.ensureIndexes()).catch(console.error);
+  }
+  return db;
+}
+
 export { dbName };
 
 export default clientPromise; 

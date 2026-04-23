@@ -21,7 +21,10 @@ export async function GET() {
   try {
     const client = await clientPromise;
     const db = client.db();
-    const students = await db.collection('students').find({}).toArray();
+    const students = await db.collection('students')
+      .find({}, { projection: { _id: 1, firstName: 1, lastName: 1, admissionNumber: 1, class: 1, campus: 1, tableNumber: 1, isPresent: 1, phoneNumber: 1 } })
+      .sort({ firstName: 1 })
+      .toArray();
     // Serialize _id to string so it works as a query param
     const serialized = students.map(s => ({ ...s, _id: s._id.toString() }));
     return NextResponse.json(serialized, {
